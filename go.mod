@@ -1,3 +1,3 @@
-module github.com/johanstokking/udp-bridge
+module github.com/rvolosatovs/udp-bridge
 
-go 1.12
+go 1.13
