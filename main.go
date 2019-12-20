@@ -1,68 +1,59 @@
 package main
 
 import (
-	"fmt"
+	"flag"
+	"log"
 	"net"
-	"os"
-	"strconv"
 )
 
 func main() {
-	localAddr := os.Getenv("LOCAL_ADDR")
-	if localAddr == "" {
-		localAddr = ":1701"
-	}
-	remoteAddr := os.Getenv("REMOTE_ADDR")
-	if remoteAddr == "" {
-		remoteAddr = "127.0.0.1:1700"
-	}
+	localAddr := flag.String("local", ":1700", "local address to tunnel from")
+	remoteAddr := flag.String("remote", "127.0.0.1:1701", "remote address to tunnel to")
+	flag.Parse()
 
-	listenAddr, err := net.ResolveUDPAddr("udp", localAddr)
+	la, err := net.ResolveUDPAddr("udp", *localAddr)
 	if err != nil {
-		panic(err)
+		log.Fatalf("Failed to resolve local address: %s", err)
 	}
-	ln, err := net.ListenUDP("udp", listenAddr)
+	l, err := net.ListenUDP("udp", la)
 	if err != nil {
-		panic(err)
+		log.Fatalf("Failed to listen on local address: %s", err)
 	}
 
 	conns := make(map[string]net.Conn)
-	buf := make([]byte, 65507)
+	b := make([]byte, 65507)
 	for {
-		n, addr, err := ln.ReadFromUDP(buf)
+		n, addr, err := l.ReadFromUDP(b)
 		if err != nil {
-			panic(err)
+			log.Printf("Failed to read UDP packet on local address: %s", err)
+			continue
 		}
 		conn, ok := conns[addr.String()]
 		if !ok {
-			var err error
-			conn, err = net.Dial("udp", remoteAddr)
+			conn, err = net.Dial("udp", *remoteAddr)
 			if err != nil {
-				panic(fmt.Sprintf("dial %v failed: %v", addr, err))
+				log.Printf("Failed to dial %s: %s", *remoteAddr, err)
+				continue
 			}
 			conns[addr.String()] = conn
 			go func() {
-				buf := make([]byte, 65507)
+				b := make([]byte, 65507)
 				for {
-					n, err := conn.Read(buf)
+					n, err := conn.Read(b)
 					if err != nil {
-						fmt.Printf("< read failed: %v\n", err)
-						return
+						log.Printf("Failed to read packet from %s: %s", conn.RemoteAddr(), err)
+						continue
 					}
-					_, err = ln.WriteToUDP(buf[:n], addr)
+					_, err = l.WriteToUDP(b[:n], addr)
 					if err != nil {
-						fmt.Printf("< write failed: %v\n", err)
-					} else {
-						fmt.Printf("< %v\n", strconv.QuoteToASCII(string(buf[:n])))
+						log.Printf("Failed to write packet to %s: %s", addr, err)
 					}
 				}
 			}()
 		}
-		_, err = conn.Write(buf[:n])
+		_, err = conn.Write(b[:n])
 		if err != nil {
-			fmt.Printf("> write failed: %v\n", err)
-		} else {
-			fmt.Printf("> %v\n", strconv.QuoteToASCII(string(buf[:n])))
+			log.Printf("Failed to write packet to %s: %s", conn.RemoteAddr(), err)
 		}
 	}
 }
